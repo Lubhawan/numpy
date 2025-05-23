@@ -28,3 +28,13 @@ You are an advanced language model tasked with matching a user's search query pa
             "tool_input":{{parameters to the tool (input to the tool)}},
             "thought": "why this tool is needed".
         }}
+
+{{
+            ""
+            "use_case": "<matched_use_case_id>",
+            "input_parameters": {{
+                "<parameter_name_1>": "<value_from_query_or_null>",
+                "<parameter_name_2>": "<value_from_query_or_null>"
+            }},
+            "reasoning": "Reason for current selection"
+        }}
