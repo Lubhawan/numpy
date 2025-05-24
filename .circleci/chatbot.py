@@ -1,10 +1,9 @@
-import streamlit as st
 import pandas as pd
 import json
 import re
 
 def display_mixed_content(data):
-    """Display mixed text and JSON content"""
+    """Display mixed text and JSON content using print statements"""
     
     # Try to detect if data contains JSON
     try:
@@ -28,52 +27,59 @@ def display_mixed_content(data):
                         
                         # Display as table if it's a list of objects
                         if isinstance(json_data, list) and json_data and isinstance(json_data[0], dict):
-                            st.subheader("📊 Table Data:")
+                            print("\n=== Table Data ===")
                             df = pd.DataFrame(json_data)
-                            st.dataframe(df, use_container_width=True)
+                            print(df.to_string(index=False))  # Pretty-print DataFrame
                         
                         # Display as JSON if it's a single object or other structure
                         elif isinstance(json_data, dict):
-                            st.subheader("📋 JSON Data:")
-                            st.json(json_data)
+                            print("\n=== JSON Data ===")
+                            print(json.dumps(json_data, indent=2))  # Pretty-print JSON
                         
                         else:
-                            st.subheader("📄 Raw JSON:")
-                            st.json(json_data)
+                            print("\n=== Raw JSON ===")
+                            print(json.dumps(json_data, indent=2))  # Pretty-print JSON
                             
                     except json.JSONDecodeError:
                         # If JSON parsing fails, treat as text
-                        st.write(part)
+                        print(part)
                 else:
                     # Display as regular text
-                    st.write(part)
+                    print(part)
         else:
             # No JSON found, display as text
-            st.write(data)
+            print(data)
             
     except Exception as e:
         # Fallback: display as text
-        st.write(data)
+        print(data)
 
-# Example usage
-mixed_data = """
-Here's some analysis of our sales data:
 
-The performance metrics show interesting trends.
+import re, json
 
-{
-    "summary": {
-        "total_sales": 15000,
-        "growth_rate": "12%"
-    },
-    "top_products": [
-        {"name": "Product A", "sales": 5000, "category": "Electronics"},
-        {"name": "Product B", "sales": 3500, "category": "Clothing"},
-        {"name": "Product C", "sales": 2800, "category": "Books"}
-    ]
-}
-
-Based on this data, we recommend focusing on electronics category.
-"""
-
-display_mixed_content(mixed_data)
+def json_parse(llm_output: str):
+        
+        # Remove BOM and normalize
+        text = llm_output.replace('\ufeff', '').strip()
+        
+        # Remove markdown code blocks
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'^```\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        
+        # Extract JSON portion (find first { to last })
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1:
+            text = text[start:end+1]
+        
+        # Fix smart quotes
+        text = text.replace('"', '"').replace('"', '"')
+        
+        # Try to parse
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Fix trailing commas and try again
+            text = re.sub(r',(\s*[}\]])', r'\1', text)
+            return json.loads(text)
