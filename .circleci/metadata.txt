@@ -1,0 +1,13 @@
+This dataset contains crime incident reports from the Chicago Police Department from 2001 to present. 
+The data includes detailed information about each crime incident including:
+
+- Crime classification (Primary Type, Description, IUCR codes)
+- Temporal information (Date, Year, Updated On)
+- Location details (Block, District, Ward, Community Area, GPS coordinates)
+- Case details (Case Number, FBI Code)
+- Incident characteristics (Arrest made, Domestic violence indicator)
+- Geographic coordinates (Latitude, Longitude, X/Y Coordinates)
+
+This dataset is commonly used for crime analysis, public safety research, and urban planning.
+The data is updated regularly and maintained by the Chicago Police Department.
+Contains 50,267 records with 21 fields per record.
