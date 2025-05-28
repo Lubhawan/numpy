@@ -41,3 +41,56 @@ def json_parse(llm_output: str):
         except json.JSONDecodeError:
             text = re.sub(r',(\s*[}\]])', r'\1', text)
             return json.loads(text)
+
+
+import pandas as pd
+import json
+import re
+import streamlit as st
+
+def display_mixed_content(data, message):
+    try:
+        json_pattern = r'(\{.*?\}|\[.*?\])'
+        json_matches = re.findall(json_pattern, data, re.DOTALL)
+        
+        if json_matches:
+            parts = re.split(json_pattern, data, flags=re.DOTALL)
+            
+            for part in parts:
+                part = part.strip()
+                if not part:
+                    continue
+                    
+                if part.startswith(('{', '[')):
+                    try:
+                        json_data = json.loads(part)
+                        
+                        if isinstance(json_data, list) and json_data and isinstance(json_data[0], dict):
+                            print("Hi")
+                            st.subheader("Table Data")
+                            df = pd.DataFrame(json_data)
+                            message.dataframe(df)
+                        
+                        elif isinstance(json_data, dict):
+                            print("hi1")
+                            message.subheader("JSON Data")
+                            message.json(json_data)
+                        
+                        else:
+                            print("hi2")
+                            message.subheader("Raw JSON")
+                            message.json(json_data)
+                            
+                    except json.JSONDecodeError:
+                        print("hi3")
+                        message.write(part)
+                else:
+                    print("hi4")
+                    message.write(part)
+        else:
+            print("no json found")
+            message.write(data)
+            
+    except Exception as e:
+        print("hi6")
+        message.write(data)
