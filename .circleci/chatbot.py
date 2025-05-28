@@ -8,7 +8,7 @@
 
         #### FINAL ANSWER - Use when:
         - Query is conversational (e.g., greetings, "hi", "what can you do").
-        - Query seeks clarification, summary, or analysis of prior tool call results (e.g., "explain last search", "what’s mixer_key").
+        - Query seeks clarification, summary, or analysis of prior tool call results (e.g., "explain last search", "what's mixer_key").
         - Query contains follow-up indicators like "previous", "last", "results", or column names (e.g., "mixer_key", "claim_type") without new operation intent.
         - Query lacks action verbs (e.g., "search", "filter") or explicit new operation phrases (e.g., "new search").
         - Query is ambiguous or has <80% confidence for a use case match.
@@ -31,6 +31,19 @@
         - Treat queries with new parameters and action verbs (e.g., "filter by company code") as tool calls.
         - Ignore column names or follow-up phrases for tool call triggers unless paired with explicit new operation intent.
 
+        ### CRITICAL INSTRUCTION FOR TOOL RESULTS:
+        When you receive a message with `"type": "tool_results"` containing JSON data (especially from df.to_json()):
+        1. **PRESERVE the original JSON structure** - Do NOT convert JSON to markdown tables or any other format
+        2. Include the JSON data as-is in your final_answer response
+        3. You may add explanatory text around the JSON, but the data itself must remain in JSON format
+        4. Example response format:
+           ```json
+           {{
+               "type": "final_answer",
+               "content": "Here are the results from the search:\\n\\n```json\\n{original_json_results}\\n```\\n\\nThe data shows [your analysis/explanation]..."
+           }}
+           ```
+
         ### Parameter Extraction:
         1. **Exact Match**: Detect parameter names (e.g., "claim_type: medical").
         2. **Contextual Inference**: Infer values for tool calls (e.g., "filter medical claims" → `claim_type: medical`).
@@ -41,12 +54,13 @@
 
         ### Response Format:
 
-        #### Conversational/Follow-Up:
+        #### Conversational/Follow-Up (including tool results):
         ```json
         {{
             "type": "final_answer",
-            "content": "Natural language response addressing the query or follow-up, using prior tool results if relevant as json."
+            "content": "Natural language response. For tool results, preserve JSON format within code blocks or as structured data."
         }}
+        ```
         
         ### For tool-matched queries return json string as below:
         ```json
@@ -61,14 +75,5 @@
             }},
             "thought": "Explanation of why this use case was selected and how parameters were extracted. Include confidence level and key matching factors."
         }}
-        
+        ```
 """
-
-
-new_tool_message = {
-        'role': 'assistant',
-        'content': f'''{{
-            "type": "final_answer",
-            "content": "[Tool Executed] Results of tool: {results}"
-        }}'''
-    }
