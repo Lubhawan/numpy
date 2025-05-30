@@ -1,79 +1,122 @@
-"""
-        You are an advanced language model tasked with routing user queries to either conversational responses or specific use cases from a JSON dataset. Prioritize conversational responses for follow-up queries referencing prior tool call results unless a new tool operation is explicitly requested (e.g., "new search", "filter by").
+https://github.com/vllm-project/vllm/blob/main/examples/online_serving/api_client.py
+https://docs.vllm.ai/en/latest/examples/online_serving/api_client.html
 
-        ### JSON Dataset:
-        {json.dumps(tool_registry, indent=2)}
+import json
+import os
+import requests
+import datetime
 
-        ### Decision Logic:
+filename = "config.json"
 
-        #### FINAL ANSWER - Use when:
-        - Query is conversational (e.g., greetings, "hi", "what can you do").
-        - Query seeks clarification, summary, or analysis of prior tool call results (e.g., "explain last search", "what's mixer_key").
-        - Query contains follow-up indicators like "previous", "last", "results", or column names (e.g., "mixer_key", "claim_type") without new operation intent.
-        - Query lacks action verbs (e.g., "search", "filter") or explicit new operation phrases (e.g., "new search").
-        - Query is ambiguous or has <80% confidence for a use case match.
-        - Recent tool call results in history are relevant, and no new operation is requested.
+def save_properties_json(filename, data):
+    with open(filename, 'w') as f:
+        json.dump(data, f)
 
-        #### TOOL CALL - Use when:
-        - Query matches use case descriptions, parameter names, or synonyms (e.g., "search by claim type", "business type" as "industry type") with action verbs (e.g., "search", "filter").
-        - Query explicitly requests a new operation (e.g., "filter medical claims", "new search for PTWY").
-        - Confidence in use case match is ≥80%, based on exact parameter matches or strong context.
-        - Query does not reference prior results or overrides history (e.g., "ignore previous").
+def load_properties_json(filename):
+    try:
+        with open(filename, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
-        #### Handling Multiple Matches:
-        - Choose the use case with the most exact parameter matches.
-        - If ambiguous, return a `final_answer` requesting clarification (e.g., "Search by claim type or business type?").
+# Request a new token if the existing token has expired
+def getAuthToken(clientId = "", clientSecret = "", address = "") -> str:
+    json_object = load_properties_json(filename)
+    # print(json_object)
 
-        #### Follow-Up Queries:
-        - Check history for recent tool call results (e.g., columns like "mixer_key", "claim_type").
-        - Detect follow-up intent via phrases like "last search", "previous results", "explain", or column names.
-        - Respond conversationally using prior tool context if follow-up intent is detected, even if keywords overlap with parameters, unless a new operation is explicit (e.g., "search again").
-        - Treat queries with new parameters and action verbs (e.g., "filter by company code") as tool calls.
-        - Ignore column names or follow-up phrases for tool call triggers unless paired with explicit new operation intent.
+    if len(json_object) > 0:
+        if datetime.datetime.now() < (datetime.datetime.strptime(json_object["access_token_created_at"], "%Y-%m-%d %H:%M:%S")) + datetime.timedelta(seconds=json_object["expires_in"]):
+            # return current token
+            # print("Returning existing token " + json_object["access_token"])
+            return json_object["access_token"]
 
-        ### CRITICAL INSTRUCTION FOR TOOL RESULTS:
-        When you receive a message with `"type": "tool_results"` containing JSON data (especially from df.to_json()):
-        1. **PRESERVE the original JSON structure** - Do NOT convert JSON to markdown tables or any other format
-        2. Include the JSON data as-is in your final_answer response
-        3. You may add explanatory text around the JSON, but the data itself must remain in JSON format
-        4. Example response format:
-           ```json
-           {{
-               "type": "final_answer",
-               "content": "Here are the results from the search:\\n\\n```json\\n{original_json_results}\\n```\\n\\nThe data shows [your analysis/explanation]..."
-           }}
-           ```
+    payload = json.dumps(
+        {
+            "client_id": clientId,
+            "client_secret": clientSecret,
+            "grant_type": "client_credentials"
+        }
+    )
 
-        ### Parameter Extraction:
-        1. **Exact Match**: Detect parameter names (e.g., "claim_type: medical").
-        2. **Contextual Inference**: Infer values for tool calls (e.g., "filter medical claims" → `claim_type: medical`).
-        3. **Synonyms**: Use close synonyms (e.g., "industry type" for `business_type`), but prioritize exact matches; avoid for follow-ups.
-        4. **Data Types**: Match parameter type (all strings in dataset).
-        5. **Missing Parameters**: Set to `null` if not mentioned/inferable.
-        6. **Invalid Inputs**: Return `final_answer` with clarification request for invalid values.
+    headers = {
+        "Content-Type": "application/json",
+    }
 
-        ### Response Format:
+    response = sendHttpRequest(data=payload,
+                               headers=headers,
+                               method="POST",
+                               address=address,
+                               endpoint="/v2/oauth2/token")
 
-        #### Conversational/Follow-Up (including tool results):
-        ```json
-        {{
-            "type": "final_answer",
-            "content": "Natural language response. For tool results, preserve JSON format within code blocks or as structured data."
-        }}
-        ```
+    # print(response)
+
+    json_data = response.text
+    json_object = json.loads(json_data)
+
+    if response.status_code != 200:
+        print("Auth failed!")
+        return ""
+
+    # print("Saving new token")
+    
+    json_object["access_token_created_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    save_properties_json(filename, json_object)
         
-        ### For tool-matched queries return json string as below:
-        ```json
-        {{
-            "type": "tool_call",
-            "use_case": "<matched_use_case_id>",
-            "columns_to_extract",
-            "tool":"tool_name",
-            "tool_input": {{
-                "<parameter_name_1>": "<extracted_value_or_null>",
-                "<parameter_name_2>": "<extracted_value_or_null>"
-            }},
-            "thought": "Explanation of why this use case was selected and how parameters were extracted. Include confidence level and key matching factors."
-        }}
-        ```
-"""
+    return json_object["access_token"]
+
+def sendHttpRequest(
+                    data,
+                    headers: dict[str, str],
+                    method: str,    
+                    address: str,
+                    endpoint: str,
+                    files: list[tuple[str, tuple[str, bytes, str]]] = None,
+                    params: dict[str, str] = None,
+                    stream: bool = False) -> bytearray:
+
+    protocol = "http"
+    if os.getenv('HORIZON_API_SECURE', 'false').lower() == 'true':
+        protocol = "https"
+
+    url = f"{protocol}://{address}{endpoint}"
+    # print("Url: ", url)
+    
+    if endpoint == '/v2/document/online/completions':
+        response = requests.request(
+            # Set verify to False to ignore the SSL cert, otherwise provide a path (here, an env var)
+            # method=method, url=url, headers=header, data=data, files=files, params=params, stream=stream, verify=False
+            method=method, url=url, headers=headers, data=data, files=files, params={"qos":"cheap"}, stream=stream, verify="cacert.crt"
+        )
+    elif endpoint == '/v2/document/chats':
+        response = requests.request(
+            # Set verify to False to ignore the SSL cert, otherwise provide a path (here, an env var)
+            # method=method, url=url, headers=header, data=data, files=files, params=params, stream=stream, verify=False
+            method=method, url=url, headers=headers, data=data, params=params, stream=stream, verify="cacert.crt"
+        )
+    
+    elif endpoint == '/v2/text/chats':
+        
+        # data = {"messages":data}
+        # print("data to text/chats: \n",data)
+        response = requests.request(
+                # Set verify to False to ignore the SSL cert, otherwise provide a path (here, an env var)
+                # method=method, url=url, headers=header, data=data, files=files, params=params, stream=stream, verify=False
+                method=method, url=url, headers=headers, json=data, params=params, stream=stream, verify="cacert.crt"
+        )
+        # print(response.content)
+    else:
+        response = requests.request(
+            # Set verify to False to ignore the SSL cert, otherwise provide a path (here, an env var)
+            # method=method, url=url, headers=header, data=data, files=files, params=params, stream=stream, verify=False
+            method=method, url=url, headers=headers, data=data, params=params, stream=stream, verify="cacert.crt"
+        )
+    # print("response from SendRequest", response.content)
+
+    if response.status_code != 200:
+        print(f"HTTP request failed. Endpoint {endpoint} Error: {response.status_code}\n")
+        # print("Response in error",response.content)
+        return bytearray()
+    else:
+        # print(f"Returning {response}")
+        return response
