@@ -395,3 +395,35 @@ def api_call(self, authToken: str,
             else:
                 print(f"Unexpected response format: {response_data}")
                 return ""
+
+
+if __name__ == "__main__":
+    from pathlib import Path
+    from pybox import AsyncLocalPyBoxManager
+    from tablegpt.agent import create_tablegpt_graph
+    from tablegpt import DEFAULT_TABLEGPT_IPYKERNEL_PROFILE_DIR
+    
+    # Use the HorizonChatLLM instead of ChatOpenAI
+    llm = HorizonChatLLM(
+        model_name="TableGPT2-7B",
+        endpoint="/v1/chat/completions",  # Adjust this to your actual endpoint
+        temperature=0.7
+    )
+    
+    # You can use the same class for normalize_llm with different settings if needed
+    normalize_llm = HorizonChatLLM(
+        model_name="YOUR_NORMALIZE_MODEL_NAME",
+        endpoint="/v1/chat/completions",
+        temperature=0.1  # Lower temperature for normalization tasks
+    )
+    
+    pybox_manager = AsyncLocalPyBoxManager(
+        profile_dir=DEFAULT_TABLEGPT_IPYKERNEL_PROFILE_DIR
+    )
+    
+    agent = create_tablegpt_graph(
+        llm=llm,
+        pybox_manager=pybox_manager,
+        normalize_llm=normalize_llm,
+        session_id="some-session-id",
+    )
