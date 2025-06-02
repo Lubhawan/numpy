@@ -356,3 +356,42 @@ if __name__ == "__main__":
     messages = [HumanMessage(content="Hello, how are you?")]
     response = llm.invoke(messages)
     print(response.content)
+
+
+def api_call(self, authToken: str,
+                 payload: dict[str, list[dict]],
+                 files: list[tuple[str, tuple[str, bytes, str]]],
+                 params: dict[str, str],
+                 endpoint: str,
+                 stream: bool=False) -> str:
+        """Original api_call method maintained."""
+        headers = {
+            "Authorization": "Bearer " + authToken
+        }
+        # Ensure files is a list of tuples
+        if files and not isinstance(files, list):
+            raise ValueError("The 'files' parameter must be a list of tuples.")
+        
+        try:
+            response = sendHttpRequest(data=payload, 
+                                       files=files, 
+                                       params=params,
+                                       headers=headers,
+                                       method="POST",
+                                       address=os.getenv('HORIZON_GATEWAY', ''),
+                                       endpoint=endpoint,
+                                       stream=stream)
+            response_data = json.loads(response.text)
+            
+            # Handle response format: {"role": "assistant", "content": "..."}
+            if isinstance(response_data, dict) and "content" in response_data:
+                return response_data["content"]
+            # Fallback to looking for "message" field
+            elif isinstance(response_data, dict) and "message" in response_data:
+                return response_data["message"]
+            # If response is a string, return it directly
+            elif isinstance(response_data, str):
+                return response_data
+            else:
+                print(f"Unexpected response format: {response_data}")
+                return ""
