@@ -1,247 +1,187 @@
-## caliing method
-if endpoint == "/v2/text/chats":
-        llm = TextChatCompletionsLLM()
-        # print(system_prompt)
-        output = llm._call(payload=payload, endpoint=endpoint, stream=False)
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+Cell In[30], line 1
+----> 1 agent.invoke(input=_input)
 
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\__init__.py:2718, in Pregel.invoke(self, input, config, stream_mode, output_keys, interrupt_before, interrupt_after, checkpoint_during, debug, **kwargs)
+   2716 else:
+   2717     chunks = []
+-> 2718 for chunk in self.stream(
+   2719     input,
+   2720     config,
+   2721     stream_mode=stream_mode,
+   2722     output_keys=output_keys,
+   2723     interrupt_before=interrupt_before,
+   2724     interrupt_after=interrupt_after,
+   2725     checkpoint_during=checkpoint_during,
+   2726     debug=debug,
+   2727     **kwargs,
+   2728 ):
+   2729     if stream_mode == "values":
+   2730         latest = chunk
 
-class TextChatCompletionsLLM:
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\__init__.py:2356, in Pregel.stream(self, input, config, stream_mode, output_keys, interrupt_before, interrupt_after, checkpoint_during, debug, subgraphs)
+   2350     # Similarly to Bulk Synchronous Parallel / Pregel model
+   2351     # computation proceeds in steps, while there are channel updates.
+   2352     # Channel updates from step N are only visible in step N+1
+   2353     # channels are guaranteed to be immutable for the duration of the step,
+   2354     # with channel updates applied only at the transition between steps.
+   2355     while loop.tick(input_keys=self.input_channels):
+-> 2356         for _ in runner.tick(
+   2357             loop.tasks.values(),
+   2358             timeout=self.step_timeout,
+   2359             retry_policy=self.retry_policy,
+   2360             get_waiter=get_waiter,
+   2361         ):
+   2362             # emit output
+   2363             yield from output()
+   2364 # emit output
 
-    def _call(self, payload=dict(), files=None, params="", endpoint="", content_type=None, stream=False, **kwargs) -> str:
-        if not os.getenv('HORIZON_CLIENT_ID'):
-            raise ValueError("HORIZON_CLIENT_ID is not set in the environment.")
-        if not os.getenv('HORIZON_CLIENT_SECRET'):
-            raise ValueError("HORIZON_CLIENT_SECRET is not set in the environment.")
-        if not os.getenv('HORIZON_GATEWAY'):
-            raise ValueError("HORIZON_GATEWAY is not set in the environment.")
-        
-        authToken = getAuthToken(os.getenv('HORIZON_CLIENT_ID', ''),
-                                 os.getenv('HORIZON_CLIENT_SECRET', ''),
-                                 os.getenv('HORIZON_GATEWAY', ''))
-        
-        try:
-            response = self.api_call(authToken=authToken,
-                                     payload=payload,
-                                     files=files,
-                                     params=params,
-                                     endpoint=endpoint,
-                                     stream=stream)
-        except Exception as e:
-            print("Error in API call: ", e)
-            return None
-        return response
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\runner.py:158, in PregelRunner.tick(self, tasks, reraise, timeout, retry_policy, get_waiter)
+    156 t = tasks[0]
+    157 try:
+--> 158     run_with_retry(
+    159         t,
+    160         retry_policy,
+    161         configurable={
+    162             CONFIG_KEY_CALL: partial(
+    163                 _call,
+    164                 weakref.ref(t),
+    165                 retry=retry_policy,
+    166                 futures=weakref.ref(futures),
+    167                 schedule_task=self.schedule_task,
+    168                 submit=self.submit,
+    169                 reraise=reraise,
+    170             ),
+    171         },
+    172     )
+    173     self.commit(t, None)
+    174 except Exception as exc:
 
-    
-    def api_call(self, authToken: str,
-                 payload: dict[str, list[dict]],
-                 files: list[tuple[str, tuple[str, bytes, str]]],
-                 params: dict[str, str],
-                 endpoint: str,
-                 stream: bool=False) -> str:
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\retry.py:39, in run_with_retry(task, retry_policy, configurable)
+     37     task.writes.clear()
+     38     # run the task
+---> 39     return task.proc.invoke(task.input, config)
+     40 except ParentCommand as exc:
+     41     ns: str = config[CONF][CONFIG_KEY_CHECKPOINT_NS]
 
-        headers = {
-            "Authorization": "Bearer " + authToken
-        }
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\utils\runnable.py:622, in RunnableSeq.invoke(self, input, config, **kwargs)
+    620     # run in context
+    621     with set_config_context(config, run) as context:
+--> 622         input = context.run(step.invoke, input, config, **kwargs)
+    623 else:
+    624     input = step.invoke(input, config)
 
-        # Ensure files is a list of tuples
-        if files and not isinstance(files, list):
-            raise ValueError("The 'files' parameter must be a list of tuples.")
-            
-        
-        try:
-            response = sendHttpRequest(data=payload, 
-                                       files=files, 
-                                       params=params,
-                                       headers=headers,
-                                       method="POST",
-                                       address=os.getenv('HORIZON_GATEWAY', ''),
-                                       endpoint=endpoint,
-                                       stream=stream)
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\__init__.py:2718, in Pregel.invoke(self, input, config, stream_mode, output_keys, interrupt_before, interrupt_after, checkpoint_during, debug, **kwargs)
+   2716 else:
+   2717     chunks = []
+-> 2718 for chunk in self.stream(
+   2719     input,
+   2720     config,
+   2721     stream_mode=stream_mode,
+   2722     output_keys=output_keys,
+   2723     interrupt_before=interrupt_before,
+   2724     interrupt_after=interrupt_after,
+   2725     checkpoint_during=checkpoint_during,
+   2726     debug=debug,
+   2727     **kwargs,
+   2728 ):
+   2729     if stream_mode == "values":
+   2730         latest = chunk
 
-            response_data = json.loads(response.text)
-            return response_data.get("message", "")
-        except (json.JSONDecodeError, KeyError) as e:
-            print(f"Error parsing API response: {e}")
-            return ""
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\__init__.py:2356, in Pregel.stream(self, input, config, stream_mode, output_keys, interrupt_before, interrupt_after, checkpoint_during, debug, subgraphs)
+   2350     # Similarly to Bulk Synchronous Parallel / Pregel model
+   2351     # computation proceeds in steps, while there are channel updates.
+   2352     # Channel updates from step N are only visible in step N+1
+   2353     # channels are guaranteed to be immutable for the duration of the step,
+   2354     # with channel updates applied only at the transition between steps.
+   2355     while loop.tick(input_keys=self.input_channels):
+-> 2356         for _ in runner.tick(
+   2357             loop.tasks.values(),
+   2358             timeout=self.step_timeout,
+   2359             retry_policy=self.retry_policy,
+   2360             get_waiter=get_waiter,
+   2361         ):
+   2362             # emit output
+   2363             yield from output()
+   2364 # emit output
 
-    
-    def _llm_type(self) -> str:
-        return "TextChatCompletionsLLM"
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\runner.py:252, in PregelRunner.tick(self, tasks, reraise, timeout, retry_policy, get_waiter)
+    250 # panic on failure or timeout
+    251 try:
+--> 252     _panic_or_proceed(
+    253         futures.done.union(f for f, t in futures.items() if t is not None),
+    254         panic=reraise,
+    255     )
+    256 except Exception as exc:
+    257     if tb := exc.__traceback__:
 
-#################################################################################################
-## Calling method
-llm = TextChatCompletionsLLM(
-        model_name="TableGPT2-7B",
-        endpoint="/v1/text/chats",
-        payload=payload  # Set your actual endpoint here
-    )
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\runner.py:504, in _panic_or_proceed(futs, timeout_exc_cls, panic)
+    502                 interrupts.append(exc)
+    503             else:
+--> 504                 raise exc
+    505 # raise combined interrupts
+    506 if interrupts:
 
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\executor.py:83, in BackgroundExecutor.done(self, task)
+     81 """Remove the task from the tasks dict when it's done."""
+     82 try:
+---> 83     task.result()
+     84 except GraphBubbleUp:
+     85     # This exception is an interruption signal, not an error
+     86     # so we don't want to re-raise it on exit
+     87     self.tasks.pop(task)
 
-import json
-import os
-from typing import Any, List, Optional, Iterator, Dict
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from langchain_core.outputs import ChatResult, ChatGeneration
-from langchain_core.callbacks.manager import CallbackManagerForLLMRun
-from ai.chatbot.horizon_dev.utils import getAuthToken, sendHttpRequest
-from dotenv import load_dotenv
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\concurrent\futures\_base.py:449, in Future.result(self, timeout)
+    447     raise CancelledError()
+    448 elif self._state == FINISHED:
+--> 449     return self.__get_result()
+    451 self._condition.wait(timeout)
+    453 if self._state in [CANCELLED, CANCELLED_AND_NOTIFIED]:
 
-load_dotenv()
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\concurrent\futures\_base.py:401, in Future.__get_result(self)
+    399 if self._exception:
+    400     try:
+--> 401         raise self._exception
+    402     finally:
+    403         # Break a reference cycle with the exception in self._exception
+    404         self = None
 
-class TextChatCompletionsLLM(BaseChatModel):
-    """
-    A LangChain-compatible chat model that uses Horizon API.
-    Maintains original class name and method signatures.
-    """
-    
-    model_name: str = "horizon-chat"
-    endpoint: str = ""  # Your endpoint
-    content_type: Optional[str] = None
-    params: str = ""
-    
-    class Config:
-        """Configuration for this model."""
-        extra = "allow"
-    
-    def __call__(self, payload=dict(), files=None, params="", endpoint="", content_type=None, stream=False, **kwargs) -> str:
-        """Original __call__ method signature maintained for backward compatibility."""
-        if not os.getenv('HORIZON_CLIENT_ID'):
-            raise ValueError("HORIZON_CLIENT_ID is not set in the environment.")
-        if not os.getenv('HORIZON_CLIENT_SECRET'):
-            raise ValueError("HORIZON_CLIENT_SECRET is not set in the environment.")
-        if not os.getenv('HORIZON_GATEWAY'):
-            raise ValueError("HORIZON_GATEWAY is not set in the environment.")
-        
-        authToken = getAuthToken(os.getenv('HORIZON_CLIENT_ID', ''),
-                                 os.getenv('HORIZON_CLIENT_SECRET', ''),
-                                 os.getenv('HORIZON_GATEWAY', ''))
-        
-        try:
-            response = self.api_call(authToken=authToken,
-                                     payload=payload,
-                                     files=files,
-                                     params=params,
-                                     endpoint=endpoint,
-                                     stream=stream)
-        except Exception as e:
-            print("Error in API call: ", e)
-            return None
-        return response
-    
-    def api_call(self, authToken: str,
-                 payload: dict[str, list[dict]],
-                 files: list[tuple[str, tuple[str, bytes, str]]],
-                 params: dict[str, str],
-                 endpoint: str,
-                 stream: bool=False) -> str:
-        """Original api_call method maintained."""
-        headers = {
-            "Authorization": "Bearer " + authToken
-        }
-        # Ensure files is a list of tuples
-        if files and not isinstance(files, list):
-            raise ValueError("The 'files' parameter must be a list of tuples.")
-        
-        try:
-            response = sendHttpRequest(data=payload, 
-                                       files=files, 
-                                       params=params,
-                                       headers=headers,
-                                       method="POST",
-                                       address=os.getenv('HORIZON_GATEWAY', ''),
-                                       endpoint=endpoint,
-                                       stream=stream)
-            response_data = json.loads(response.text)
-            return response_data.get("message", "")
-        except (json.JSONDecodeError, KeyError) as e:
-            print(f"Error parsing API response: {e}")
-            return ""
-    
-    @property
-    def _llm_type(self) -> str:
-        """Return type of language model - using your original method name."""
-        return "TextChatCompletionsLLM"
-    
-    def _convert_message_to_dict(self, message: BaseMessage) -> Dict[str, str]:
-        """Convert a LangChain message to Horizon API format."""
-        if isinstance(message, HumanMessage):
-            return {"role": "user", "content": message.content}
-        elif isinstance(message, AIMessage):
-            return {"role": "assistant", "content": message.content}
-        elif isinstance(message, SystemMessage):
-            return {"role": "system", "content": message.content}
-        else:
-            # Default to user role for other message types
-            return {"role": "user", "content": str(message.content)}
-    
-    def _create_payload_from_messages(self, messages: List[BaseMessage], stream: bool = False) -> Dict[str, Any]:
-        """Create the payload for Horizon API from LangChain messages."""
-        # Convert messages to the format expected by your API
-        formatted_messages = [self._convert_message_to_dict(msg) for msg in messages]
-        
-        # Create payload with only messages and stream parameters
-        payload = {
-            "messages": formatted_messages,
-            "stream": str(stream)  # Convert boolean to string as per your API requirement
-        }
-                
-        return payload
-    
-    def _generate(
-        self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        """Generate a response from the Horizon API - required by LangChain."""
-        # Create payload with stream=False for regular generation
-        payload = self._create_payload_from_messages(messages, stream=False)
-        
-        # Use the original __call__ method
-        response_content = self.__call__(
-            payload=payload,
-            files=None,
-            params=self.params,
-            endpoint=self.endpoint,
-            content_type=self.content_type,
-            stream=False
-        )
-        
-        message = AIMessage(content=response_content)
-        generation = ChatGeneration(message=message)
-        
-        return ChatResult(generations=[generation])
-    
-    def _stream(
-        self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> Iterator[ChatGeneration]:
-        """Stream responses from the Horizon API - required by LangChain."""
-        # Create payload with stream=True for streaming
-        payload = self._create_payload_from_messages(messages, stream=True)
-        
-        # Use the original __call__ method with streaming
-        response_content = self.__call__(
-            payload=payload,
-            files=None,
-            params=self.params,
-            endpoint=self.endpoint,
-            content_type=self.content_type,
-            stream=True
-        )
-        
-        message = AIMessage(content=response_content)
-        yield ChatGeneration(message=message)
-    
-    @property
-    def _identifying_params(self) -> Dict[str, Any]:
-        """Get the identifying parameters."""
-        return {
-            "model_name": self.model_name,
-            "endpoint": self.endpoint,
-        }
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\concurrent\futures\thread.py:59, in _WorkItem.run(self)
+     56     return
+     58 try:
+---> 59     result = self.fn(*self.args, **self.kwargs)
+     60 except BaseException as exc:
+     61     self.future.set_exception(exc)
+
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\retry.py:39, in run_with_retry(task, retry_policy, configurable)
+     37     task.writes.clear()
+     38     # run the task
+---> 39     return task.proc.invoke(task.input, config)
+     40 except ParentCommand as exc:
+     41     ns: str = config[CONF][CONFIG_KEY_CHECKPOINT_NS]
+
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\utils\runnable.py:622, in RunnableSeq.invoke(self, input, config, **kwargs)
+    620     # run in context
+    621     with set_config_context(config, run) as context:
+--> 622         input = context.run(step.invoke, input, config, **kwargs)
+    623 else:
+    624     input = step.invoke(input, config)
+
+File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\utils\runnable.py:317, in RunnableCallable.invoke(self, input, config, **kwargs)
+    313 def invoke(
+    314     self, input: Any, config: Optional[RunnableConfig] = None, **kwargs: Any
+    315 ) -> Any:
+    316     if self.func is None:
+--> 317         raise TypeError(
+    318             f'No synchronous function provided to "{self.name}".'
+    319             "\nEither initialize with a synchronous function or invoke"
+    320             " via the async API (ainvoke, astream, etc.)"
+    321         )
+    322     if config is None:
+    323         config = ensure_config()
+
+TypeError: No synchronous function provided to "retrieve_columns".
+Either initialize with a synchronous function or invoke via the async API (ainvoke, astream, etc.)
+During task with name 'retrieve_columns' and id '805d07a8-ea72-11f9-8fb0-a51c99e537ee'
+During task with name 'data_analyze_graph' and id '75b517a9-7f90-7d16-7ca2-bd52960b57f8'
