@@ -312,3 +312,47 @@ if __name__ == "__main__":
     # You can also still use your original method directly
     # response = llm(payload={"messages": [{"role": "user", "content": "Hello"}], "stream": "False"})
     # print(response)
+
+
+# Usage example with TableGPT
+if __name__ == "__main__":
+    from pathlib import Path
+    from pybox import AsyncLocalPyBoxManager
+    from tablegpt.agent import create_tablegpt_graph
+    from tablegpt import DEFAULT_TABLEGPT_IPYKERNEL_PROFILE_DIR
+    
+    # Option 1: Use the modified TextChatCompletionsLLM directly
+    llm = TextChatCompletionsLLM(
+        model_name="TableGPT2-7B",
+        endpoint="/your/chat/endpoint",  # Set your actual endpoint here
+    )
+    
+    # Option 2: Use the wrapper if you want to keep original class unchanged
+    # llm = LangChainTextChatCompletionsLLM(
+    #     endpoint="/your/chat/endpoint",
+    # )
+    
+    # For normalize_llm
+    normalize_llm = TextChatCompletionsLLM(
+        model_name="YOUR_NORMALIZE_MODEL_NAME",
+        endpoint="/your/chat/endpoint",
+    )
+    
+    pybox_manager = AsyncLocalPyBoxManager(
+        profile_dir=DEFAULT_TABLEGPT_IPYKERNEL_PROFILE_DIR
+    )
+    
+    agent = create_tablegpt_graph(
+        llm=llm,
+        pybox_manager=pybox_manager,
+        normalize_llm=normalize_llm,
+        session_id="some-session-id",
+    )
+    
+    # Test the LLM directly
+    from langchain_core.messages import HumanMessage
+    
+    # Test basic chat
+    messages = [HumanMessage(content="Hello, how are you?")]
+    response = llm.invoke(messages)
+    print(response.content)
