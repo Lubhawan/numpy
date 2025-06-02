@@ -403,18 +403,21 @@ if __name__ == "__main__":
     from tablegpt.agent import create_tablegpt_graph
     from tablegpt import DEFAULT_TABLEGPT_IPYKERNEL_PROFILE_DIR
     
-    # Use the HorizonChatLLM instead of ChatOpenAI
-    llm = HorizonChatLLM(
+    # Option 1: Use the modified TextChatCompletionsLLM directly
+    llm = TextChatCompletionsLLM(
         model_name="TableGPT2-7B",
-        endpoint="/v1/chat/completions",  # Adjust this to your actual endpoint
-        temperature=0.7
+        endpoint="/your/chat/endpoint",  # Set your actual endpoint here
     )
     
-    # You can use the same class for normalize_llm with different settings if needed
-    normalize_llm = HorizonChatLLM(
+    # Option 2: Use the wrapper if you want to keep original class unchanged
+    # llm = LangChainTextChatCompletionsLLM(
+    #     endpoint="/your/chat/endpoint",
+    # )
+    
+    # For normalize_llm
+    normalize_llm = TextChatCompletionsLLM(
         model_name="YOUR_NORMALIZE_MODEL_NAME",
-        endpoint="/v1/chat/completions",
-        temperature=0.1  # Lower temperature for normalization tasks
+        endpoint="/your/chat/endpoint",
     )
     
     pybox_manager = AsyncLocalPyBoxManager(
@@ -427,3 +430,15 @@ if __name__ == "__main__":
         normalize_llm=normalize_llm,
         session_id="some-session-id",
     )
+    
+    # Test the LLM directly
+    from langchain_core.messages import HumanMessage
+    
+    # Test basic chat
+    messages = [HumanMessage(content="Hello, how are you?")]
+    response = llm.invoke(messages)
+    print(response.content)
+    
+    # You can also still use your original method directly
+    # response = llm(payload={"messages": [{"role": "user", "content": "Hello"}], "stream": "False"})
+    # print(response)
