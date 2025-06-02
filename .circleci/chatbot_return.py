@@ -1,76 +1,142 @@
-def json_parse(llm_output: str):
+import json
+import os
+from typing import Any, List, Optional, Iterator, Dict
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.outputs import ChatResult, ChatGeneration
+from langchain_core.callbacks.manager import CallbackManagerForLLMRun
+from ai.chatbot.horizon_dev.utils import getAuthToken, sendHttpRequest
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class HorizonChatLLM(BaseChatModel):
     """
-    Parse JSON from LLM output, handling various formatting issues.
-    
-    Args:
-        llm_output: Raw string output from LLM that may contain JSON
-        
-    Returns:
-        Parsed JSON object (dict/list)
+    A LangChain-compatible chat model that uses Horizon API with simple message format.
     """
-    # Remove BOM and strip whitespace
-    text = llm_output.replace('\ufeff', '').strip()
     
-    # Remove markdown code block markers
-    text = re.sub(r'^```json\s*', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^```\s*', '', text, flags=re.MULTILINE)
-    text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
+    model_name: str = "horizon-chat"
+    endpoint: str = ""  # Your endpoint
+    streaming: bool = False
     
-    # Extract JSON object/array (find outermost braces/brackets)
-    # First try to find object
-    obj_start = text.find('{')
-    obj_end = text.rfind('}')
+    class Config:
+        """Configuration for this model."""
+        extra = "allow"
     
-    # Then try to find array
-    arr_start = text.find('[')
-    arr_end = text.rfind(']')
+    @property
+    def _llm_type(self) -> str:
+        """Return type of language model."""
+        return "horizon_chat"
     
-    # Determine which is the outermost structure
-    if obj_start != -1 and obj_end != -1:
-        if arr_start != -1 and arr_end != -1:
-            # Both found, use the outermost
-            if obj_start < arr_start:
-                text = text[obj_start:obj_end+1]
-            else:
-                text = text[arr_start:arr_end+1]
+    def _convert_message_to_dict(self, message: BaseMessage) -> Dict[str, str]:
+        """Convert a LangChain message to Horizon API format."""
+        if isinstance(message, HumanMessage):
+            return {"role": "user", "content": message.content}
+        elif isinstance(message, AIMessage):
+            return {"role": "assistant", "content": message.content}
+        elif isinstance(message, SystemMessage):
+            return {"role": "system", "content": message.content}
         else:
-            # Only object found
-            text = text[obj_start:obj_end+1]
-    elif arr_start != -1 and arr_end != -1:
-        # Only array found
-        text = text[arr_start:arr_end+1]
+            # Default to user role for other message types
+            return {"role": "user", "content": str(message.content)}
     
-    # Fix smart quotes - THIS WAS THE BUG!
-    # Replace various quote types with standard quotes
-    text = text.replace('"', '"')  # Left smart quote
-    text = text.replace('"', '"')  # Right smart quote
-    text = text.replace(''', "'")  # Left smart single quote
-    text = text.replace(''', "'")  # Right smart single quote
-    text = text.replace('„', '"')  # German/Polish quote
-    text = text.replace('"', '"')  # Another type of smart quote
-    
-    # Fix common JSON issues
-    # Remove trailing commas
-    text = re.sub(r',(\s*[}\]])', r'\1', text)
-    
-    # Try to parse
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        # If it still fails, try some more aggressive fixes
+    def _create_payload(self, messages: List[BaseMessage], stream: bool = False) -> Dict[str, Any]:
+        """Create the payload for Horizon API."""
+        # Convert messages to the format expected by your API
+        formatted_messages = [self._convert_message_to_dict(msg) for msg in messages]
         
-        # Fix unescaped newlines in strings
-        text = re.sub(r'("(?:[^"\\]|\\.)*")', lambda m: m.group(1).replace('\n', '\\n'), text)
+        # Create payload with only messages and stream parameters
+        payload = {
+            "messages": formatted_messages,
+            "stream": str(stream)  # Convert boolean to string as per your API requirement
+        }
+                
+        return payload
+    
+    def _call_api(self, payload: Dict[str, Any]) -> str:
+        """Make the actual API call to Horizon."""
+        if not os.getenv('HORIZON_CLIENT_ID'):
+            raise ValueError("HORIZON_CLIENT_ID is not set in the environment.")
+        if not os.getenv('HORIZON_CLIENT_SECRET'):
+            raise ValueError("HORIZON_CLIENT_SECRET is not set in the environment.")
+        if not os.getenv('HORIZON_GATEWAY'):
+            raise ValueError("HORIZON_GATEWAY is not set in the environment.")
         
-        # Fix single quotes (convert to double quotes carefully)
-        # This is risky but sometimes necessary
-        # Only do this if the JSON parse failed
+        authToken = getAuthToken(
+            os.getenv('HORIZON_CLIENT_ID', ''),
+            os.getenv('HORIZON_CLIENT_SECRET', ''),
+            os.getenv('HORIZON_GATEWAY', '')
+        )
+        
+        headers = {
+            "Authorization": f"Bearer {authToken}"
+        }
+        
+        # Determine if streaming based on payload
+        stream = payload.get("stream", "False") == "True"
+        
         try:
-            # Try parsing with single quotes replaced
-            temp_text = re.sub(r"'([^']*)'", r'"\1"', text)
-            return json.loads(temp_text)
-        except:
-            pass
+            response = sendHttpRequest(
+                data=payload,
+                files=None,
+                params="",
+                headers=headers,
+                method="POST",
+                address=os.getenv('HORIZON_GATEWAY', ''),
+                endpoint=self.endpoint,
+                stream=stream
+            )
+            
+            response_data = json.loads(response.text)
+            
+            # Extract the message content from the response
+            # Based on your original code, it seems the response has a "message" field
+            return response_data.get("message", "")
+                
+        except Exception as e:
+            print(f"Error in API call: {e}")
+            raise
+    
+    def _generate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        """Generate a response from the Horizon API."""
+        # Create payload with stream=False for regular generation
+        payload = self._create_payload(messages, stream=False)
         
-        # Re-raise the original error if all fixes fail
-        raise e
+        response_content = self._call_api(payload)
+        
+        message = AIMessage(content=response_content)
+        generation = ChatGeneration(message=message)
+        
+        return ChatResult(generations=[generation])
+    
+    def _stream(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGeneration]:
+        """Stream responses from the Horizon API."""
+        # Create payload with stream=True for streaming
+        payload = self._create_payload(messages, stream=True)
+        
+        # For now, this returns the full response
+        # You'll need to implement actual streaming logic based on how your API returns streamed data
+        response_content = self._call_api(payload)
+        
+        message = AIMessage(content=response_content)
+        yield ChatGeneration(message=message)
+    
+    @property
+    def _identifying_params(self) -> Dict[str, Any]:
+        """Get the identifying parameters."""
+        return {
+            "model_name": self.model_name,
+            "endpoint": self.endpoint,
+        }
