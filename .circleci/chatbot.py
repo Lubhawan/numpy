@@ -1,369 +1,126 @@
-import logging
-import os
-from pathlib import Path
-import re
-import time
-import pandas as pd
-from playwright.sync_api import Playwright, sync_playwright
-from dotenv import load_dotenv
-load_dotenv()
+f"""
+        You are an advanced language model tasked with routing user queries to either conversational responses or specific use cases from a JSON dataset. Prioritize conversational responses for follow-up queries referencing prior tool call results unless a new tool operation is explicitly requested (e.g., "new search", "filter by").
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-    handlers=[
-        logging.FileHandler("temp/mixer_par_npar_definition_search.log"),
-        logging.StreamHandler()
-    ]
-)
+        ### JSON Dataset:
+        {json.dumps(tool_registry, indent=2)}
 
-def extract_par_mixer_definition_details(playwright: Playwright,
-                                         claim_type: str,
-                                         service_from_date: str,
-                                         mixer_fetch_number: None,
-                                         par_fetch_number: None) -> None:
-    browser = playwright.chromium.launch(channel="chrome", headless=False)
-    context = browser.new_context(http_credentials={
-        "username": os.getenv("PEGA_USERNAME"),
-        "password": os.getenv("PEGA_PASSWORD"),
-    },
-    accept_downloads=True,
-    )
-    page = context.new_page()
-    page.goto("https://pmc.uat.antheminc.com/prweb/PRAuth/SSO")
+        ### Decision Logic:
 
-    # Wait for either login page or landing page
-    page.wait_for_load_state("networkidle")
+        #### FINAL ANSWER - Use when:
+        - Query is conversational (e.g., greetings, "hi", "what can you do").
+        - Query seeks clarification, summary, or analysis of prior tool call results (e.g., "explain last search", "what's mixer_key").
+        - Query contains follow-up indicators like "previous", "last", "results", or column names (e.g., "mixer_key", "claim_type") without new operation intent.
+        - Query lacks action verbs (e.g., "search", "filter") or explicit new operation phrases (e.g., "new search").
+        - Query is ambiguous or has <80% confidence for a use case match.
+        - Recent tool call results in history are relevant, and no new operation is requested.
 
-    current_url = page.url
+        #### TOOL CALL - Use when:
+        - Query matches use case descriptions, parameter names, or synonyms (e.g., "search by claim type", "business type" as "industry type") with action verbs (e.g., "search", "filter").
+        - Query explicitly requests a new operation (e.g., "filter medical claims", "new search for PTWY").
+        - Confidence in use case match is ≥80%, based on exact parameter matches or strong context.
+        - Query does not reference prior results or overrides history (e.g., "ignore previous").
 
-    if re.match(r"https://secure-fed\.uat\.anthem\.com/as/.*/resume/as/authorization\.ping", current_url):
-        # Not logged in, perform login
-        page.locator("#username").fill(os.getenv("PEGA_USERNAME"))
-        page.locator("#password").fill(os.getenv("PEGA_PASSWORD"))
-        page.get_by_text("Submit").click()
-        # Optionally wait for landing page after login
-        page.wait_for_load_state()
-    else:
-        logging.info("Already logged in, skipping login steps.")
+        #### Handling Multiple Matches:
+        - Choose the use case with the most exact parameter matches.
+        - If ambiguous, return a `final_answer` requesting clarification (e.g., "Search by claim type or business type?").
 
-    # page.wait_for_url(re.compile(r"https://secure-fed\.uat\.anthem\.com/as/.*/resume/as/authorization\.ping"))
-    
-    # Move mouse to the left edge so that the navbar appears
-    page.mouse.move(10, 300)
-    page.get_by_role("menuitem", name=" Mixer").click()
-    page.wait_for_load_state("networkidle")
+        #### Follow-Up Queries:
+        - Check history for recent tool call results (e.g., columns like "mixer_key", "claim_type").
+        - Detect follow-up intent via phrases like "last search", "previous results", "explain", or column names.
+        - Respond conversationally using prior tool context if follow-up intent is detected, even if keywords overlap with parameters, unless a new operation is explicit (e.g., "search again").
+        - Treat queries with new parameters and action verbs (e.g., "filter by company code") as tool calls.
+        - Ignore column names or follow-up phrases for tool call triggers unless paired with explicit new operation intent.
 
-    # Wait for "Mixer" button text
-    mixer_text = page.locator(
-        "iframe[name=\"PegaGadget0Ifr\"]"
-    ).content_frame.locator(
-        "[data-test-id=\"\\32 02007270744300208593_header\"]"
-    ).get_by_role("button").inner_text(timeout=10000)
-    if "Mixer" not in mixer_text:
-        raise Exception("Mixer button not found or text mismatch.")
+        ### CRITICAL INSTRUCTION FOR TOOL RESULTS:
+        When you receive a message with `"type": "tool_results"` containing JSON data (especially from df.to_json()):
+        1. **PRESERVE the original JSON structure** - Do NOT convert JSON to markdown tables or any other format
+        2. Include the JSON data as-is in your final_answer response
+        3. You may add explanatory text around the JSON, but the data itself must remain in JSON format
+        4. Example response format:
+           ```json
+           {{
+               "type": "final_answer",
+               "content": "Here are the results from the search:\\n\\n```json\\n{{original_json_results}}\\n```\\n\\nThe data shows [your analysis/explanation]..."
+           }}
+           ```
 
-    # Wait for "Mixer Data" button text
-    mixer_data_text = page.locator(
-        "iframe[name=\"PegaGadget0Ifr\"]"
-    ).content_frame.locator(
-        "[data-test-id=\"\\32 02105071050000776403_header\"]"
-    ).get_by_role("button").inner_text(timeout=10000)
-    if "Mixer Data" not in mixer_data_text:
-        raise Exception("Mixer Data button not found or text mismatch.")
+        ### Parameter Extraction:
+        1. **Exact Match**: Detect parameter names (e.g., "claim_type: medical").
+        2. **Contextual Inference**: Infer values for tool calls (e.g., "filter medical claims" → `claim_type: medical`).
+        3. **Synonyms**: Use close synonyms (e.g., "industry type" for `business_type`), but prioritize exact matches; avoid for follow-ups.
+        4. **Data Types**: Match parameter type (all strings in dataset).
+        5. **Missing Parameters**: Set to `null` if not mentioned/inferable.
+        6. **Invalid Inputs**: Return `final_answer` with clarification request for invalid values.
 
-    # Wait for "Intraplan Search" button text
-    intraplan_text = page.locator(
-        "iframe[name=\"PegaGadget0Ifr\"]"
-    ).content_frame.locator(
-        "[data-test-id=\"\\32 02007300842570961532_header\"]"
-    ).get_by_role("button").inner_text(timeout=10000)
-    if "Intraplan Search" not in intraplan_text:
-        raise Exception("Intraplan Search button not found or text mismatch.")
-    
-    # Select "Claim Type" - Professional (P) or Institutional (I) or Both (B)
-    page.locator("iframe[name=\"PegaGadget0Ifr\"]").content_frame.locator("[data-test-id=\"\\32 02007270744300209206208\"]").select_option(claim_type)
+        ### Response Format:
 
-    # Select "Service From Date" - 5/11/2025
-    page.locator("iframe[name=\"PegaGadget0Ifr\"]").content_frame.locator("[data-test-id=\"\\32 02007270744300212213698\"]").fill(service_from_date)
-    
-    # Select "Service Thru Date" - 12/31/9999
-    page.locator("iframe[name=\"PegaGadget0Ifr\"]").content_frame.locator("[data-test-id=\"\\32 02007270744300213214304\"]").fill("12/31/9999")
-    
-    # Click "Search" button
-    page.locator("iframe[name=\"PegaGadget0Ifr\"]").content_frame.locator("[data-test-id=\"\\32 01911280422460287138707\"]").click()
-
-    page.wait_for_load_state("networkidle")
-
-    # Wait for the search results to load
-    results_text = page.locator(
-        "iframe[name=\"PegaGadget0Ifr\"]"
-    ).content_frame.locator(
-        "[data-test-id=\"\\32 020050306042607747849\"]"
-    ).inner_text()
-
-    if not re.search(r"\d+ results found", results_text):
-        raise Exception("No results found.")
-    
-    # mixer_df = pd.DataFrame(columns=[, 
-    #                                  "Network/Contract", "Pricing Contract", "Pricing Variance", "Par Ind"])
-
-    # mixer_df["Business Type"] = pd.Series(dtype="string")
-    # mixer_df["Mixer Ind F"] = pd.Series(dtype="string")
-    # mixer_df["Mixer Ind W"] = pd.Series(dtype="string")
-    
-
-    # total_search_results = int(re.search(r"(\d+) results found", results_text).group(1))
-
-    if mixer_fetch_number is None:
-        number_of_pages = int(page.locator(
-            "iframe[name=\"PegaGadget0Ifr\"]"
-            ).content_frame.locator(
-                "[data-test-id=\"\\32 019112808553400251\"] tr"
-                ).filter(
-                    has_text="Export to ExcelExport Non Par"
-                    ).locator(
-                        "[data-test-id=\"\\32 0141121165713061615380\"]"
-                        ).inner_text())
-    else:
-        number_of_pages = mixer_fetch_number
-    j = 0
-
-    while number_of_pages > 0:
-        i = 1
-        page_input = page.locator(
-            "iframe[name=\"PegaGadget0Ifr\"]"
-            ).content_frame.locator('input[name="pyGridActivePage"]').first
-        # Get the aria-label attribute
-        aria_label = page_input.get_attribute("aria-label")
-        # Extract the first number using regex
-        current_page = int(re.search(r"\b(\d+)\b", aria_label).group(1))
-
-        while i <= 10:
-            j = j + 1
-            logging.info(f"Processing overall row {j} and current row {i} on page {current_page}")
-            try:
-                row_locator = page.locator(
-                    "iframe[name=\"PegaGadget0Ifr\"]"
-                    ).content_frame.locator(
-                        f"[data-test-id=\"\\32 019112808553400251-R{j}\"] [data-test-id=\"\\32 02007221237320152105630\"]"
-                        )
-
-                if not row_locator.is_visible(timeout=3000):
-                    logging.info(f"Row {j} is not visible. Breaking inner loop.")
-                    break
-
-                row_locator.click()
-
-                page.locator(
-                    "iframe[name=\"PegaGadget0Ifr\"]"
-                    ).content_frame.get_by_role("menuitem", name="View Mixer Details").click()
-
-                
-                business_type = page.locator(
-                    "iframe[name=\"PegaGadget1Ifr\"]"
-                    ).content_frame.locator("div").filter(
-                        has_text=re.compile(r"^Business typeno value$")
-                        ).locator("[data-test-id=\"\\32 020031808065500477439\"]").inner_text()
-
-                mixer_ind_f = page.locator(
-                    "iframe[name=\"PegaGadget1Ifr\"]"
-                    ).content_frame.locator("div").filter(
-                        has_text=re.compile(r"^MIX IND F Return value to CLMno value$")
-                        ).locator("[data-test-id=\"\\32 020031808065500477439\"]").inner_text()
-
-                mixer_ind_w = page.locator(
-                    "iframe[name=\"PegaGadget1Ifr\"]"
-                    ).content_frame.locator("div").filter(
-                        has_text=re.compile(r"^MIX IND W Return value to CLMno value$")
-                        ).locator("[data-test-id=\"\\32 020031808065500477439\"]").inner_text()
-
-                # logging.info(f"Business Type: {business_type}")
-                # mixer_df.at[j, "Business Type"] = business_type
-                # logging.info(f"Mixer Ind F: {mixer_ind_f}")
-                # mixer_df.at[j, "Mixer Ind F"] = mixer_ind_f
-                # logging.info(f"Mixer Ind W: {mixer_ind_w}")
-                # mixer_df.at[j, "Mixer Ind W"] = mixer_ind_w
-
-                code_spans = page.locator(
-                                    "iframe[name=\"PegaGadget1Ifr\"]"
-                                ).content_frame.locator(
-                                    "span[data-test-id=\"202007291253110027323989\"]"
-                                ).all_inner_texts()
-
-                # Assign by index (adjust indices if order is different)
-                last_alphabet = (code_spans[1] if len(code_spans) > 1 else "").split()[0][0]
-                product_code = code_spans[2] if len(code_spans) > 2 else ""
-                coverage_code = code_spans[3] if len(code_spans) > 3 else ""
-                variance = code_spans[4] if len(code_spans) > 4 else ""
-                i = i + 1
-                logging.info(f"Tab Name: {product_code}{coverage_code}{variance}P{last_alphabet}")
-
-                # EXTRACT PAR RESULTS
-                # Wait for the iframe to be available
-                iframe_selector = f'iframe[title="{product_code}{coverage_code}{variance}P{last_alphabet}"]'
-                page.wait_for_selector(iframe_selector, timeout=10000)
-
-                # Use FrameLocator to find the divs
-                results_locator = page.frame_locator(iframe_selector).locator("div.dataLabelRead")
-
-                par_results = None
-                for text in results_locator.all_inner_texts():
-                    logging.info(f"dataLabelRead text: {text}")
-                    if re.search(r"\d+\s+results found", text):
-                        par_results = text
-                        break
-
-                if par_results is None:
-                    logging.warning("No PAR results div found.")
-                else:
-                    logging.info(f"PAR Results: {par_results}")
-
-                number_of_results = int(re.search(r"(\d+) results found", par_results).group(1))
-                if number_of_results > 20:
-                    try:
-                        number_of_par_pages = int(
-                            page.locator(f"iframe[title=\"{product_code}{coverage_code}{variance}P{last_alphabet}\"]"
-                                        ).content_frame.locator(
-                                            "div.dataLabelRead"
-                                            ).filter(
-                                                has_text=re.compile(r"^\d+$")
-                                                ).first.inner_text())
-                    except Exception as e:
-                        logging.exception(f"Error occurred: {e}")
-                        number_of_par_pages = 1
-                elif number_of_results == 0:
-                    number_of_par_pages = 0
-                else:
-                    number_of_par_pages = 1
-                
-                if par_fetch_number is not None and number_of_par_pages != 0:
-                    number_of_par_pages = par_fetch_number
-
-                logging.info(f"Number of PAR results: {number_of_results} -- Number of pages: {number_of_par_pages}")
-
-                par_df = pd.DataFrame(columns=["Business Type", "Mixer Ind F", "Mixer Ind W",
-                                               "Product Code", "Coverage Code", 
-                                                "Variance", "Priority Order",
-                                                "Network/Contract", "Pricing Contract",
-                                                "Pricing Variance", "Par Ind"])
-
-                while number_of_par_pages > 0:
-                    if number_of_results > 20:
-                        current_page = int(page.locator(
-                            f"iframe[title=\"{product_code}{coverage_code}{variance}P{last_alphabet}\"]"
-                            ).content_frame.get_by_role(
-                                "textbox", name="Page 1 of").input_value())
-                    else:
-                        current_page = 1
-                    
-                    content_frame = page.locator(f"iframe[title=\"{product_code}{coverage_code}{variance}P{last_alphabet}\"]").content_frame
-
-                    # Extract headers
-                    header_cells = content_frame.locator("table.gridTable > tbody > tr").first.locator("th")
-                    headers = [header_cells.nth(i).locator(".cellIn").inner_text().strip() for i in range(header_cells.count())]
-                    headers = ["Business Type", "Mixer Ind F", "Mixer Ind W", "Product Code", "Coverage Code", "Variance"] + headers
-                    logging.info(f"Par Table Headers: {headers}")
-
-                    try:
-                        table_locator = content_frame.locator('table#bodyTbl_right').nth(0)
-                        row_locators = table_locator.locator("tbody > tr.oddRow, tbody > tr.evenRow")
-                        logging.info(f"Extracting {row_locators.count()} rows on PAR page {current_page}")
-                        for row_idx in range(row_locators.count()):
-                            rows = [business_type, mixer_ind_f, mixer_ind_w, product_code, coverage_code, variance]
-                            cell_locators = row_locators.nth(row_idx).locator("td")
-                            row_data = [cell_locators.nth(i).locator("span").inner_text().strip() for i in range(cell_locators.count())]
-                            rows.extend(row_data)
-                            logging.info(f"Par Table Rows - {row_idx}: {rows}")
-                            temp_par_df = pd.DataFrame([rows], columns=headers)
-                            par_df = pd.concat([par_df, temp_par_df], ignore_index=True)
-
-                    except Exception as e:
-                        logging.exception(f"Error occurred: {e}")
-                        break
-                        
-                    next_button_locator = page.locator(f"iframe[title=\"{product_code}{coverage_code}{variance}P{last_alphabet}\"]").content_frame.get_by_role("button", name=">", exact=True)
-                    
-                    if next_button_locator.count() > 0 and next_button_locator.is_visible(timeout=1000):
-                        next_button_locator.click(timeout=3000)
-                        page.wait_for_load_state("networkidle")
-                    else:
-                        logging.info("Next button not found or not visible, ending PAR page loop.")
-                    
-                    number_of_par_pages = number_of_par_pages - 1
-                    logging.info(f"Number of PAR pages left: {number_of_par_pages}")
-                
-                try:
-                    saved_par_df = pd.read_excel(Path(__file__).parent.parent / "temp/par_results.xlsx")
-                    par_df = pd.concat([saved_par_df, par_df], ignore_index=True)
-                    par_df.to_excel(Path(__file__).parent.parent / "temp/par_results.xlsx", index=False)
-                except FileNotFoundError:
-                    par_df.to_excel(Path(__file__).parent.parent / "temp/par_results.xlsx", index=False)
-                logging.info("PAR results saved to par_results.xlsx")
-
-            except Exception as e:
-                logging.error(f"Error occurred: {e}")
-                break
-
-            finally:
-                try:
-                    page.get_by_role(
-                        "tab", name=f"{product_code}{coverage_code}{variance}P{last_alphabet} Press Delete to"
-                    ).get_by_label("Close this tab").click(timeout=3000)
-                except Exception as close_e:
-                    logging.warning(f"Could not close tab: {close_e}")
+        #### Conversational/Follow-Up (including tool results):
+        ```json
+        {{
+            "type": "final_answer",
+            "content": "Natural language response. For tool results, preserve JSON format within code blocks or as structured data."
+        }}
+        ```
         
-        # get the next page
-        next_page_locator = page.locator(
-            "iframe[name=\"PegaGadget0Ifr\"]"
-            ).content_frame.locator(
-                "[data-test-id=\"\\32 019112808553400251\"] tr"
-                ).filter(
-                    has_text="Export to ExcelExport Non Par"
-                    ).locator(
-                        "button[name=\"pyGridPaginator_pyDisplayHarness\\.CPRActions_9\"]"
-                        )
-        if not next_page_locator.is_visible(timeout=2000):
-            logging.info("Next page locator is not visible. Breaking inner loop.")
-            break
+        ### For tool-matched queries return json string as below:
+        ```json
+        {{
+            "type": "tool_call",
+            "use_case": "<matched_use_case_id>",
+            "columns_to_extract",
+            "tool":"tool_name",
+            "tool_input": {{
+                "<parameter_name_1>": "<extracted_value_or_null>",
+                "<parameter_name_2>": "<extracted_value_or_null>"
+            }},
+            "thought": "Explanation of why this use case was selected and how parameters were extracted. Include confidence level and key matching factors."
+        }}
+        ```
+"""
 
-        next_page_locator.click()
-        page.wait_for_load_state("networkidle")
+from langgraph.graph import StateGraph
+from langgraph.checkpoint.memory import InMemorySaver
+from ai.chatbot.agents.ToolExecutionNode import tool_execution_node
+from ai.chatbot.graphs.GraphState import GraphState
+from ai.chatbot.agents.GripAIAgent import online_completions_llm_node
+from ai.chatbot.graphs.route_after_agent import route_after_agent
 
-        page_input = page.locator(
-            "iframe[name=\"PegaGadget0Ifr\"]"
-            ).content_frame.locator('input[name="pyGridActivePage"]').first
-        # Get the aria-label attribute
-        aria_label = page_input.get_attribute("aria-label")
-        # Extract the first number using regex
-        current_page = int(re.search(r"\b(\d+)\b", aria_label).group(1))
+memory = InMemorySaver()
 
-        number_of_pages =  number_of_pages - 1
-        logging.info(f"Number of Mxer details pages left: {number_of_pages}")
+def get_agent_graph():
+    graph_builder = StateGraph(GraphState)
 
-   
-    # mixer_df.to_excel(Path(__file__).parent.parent / "temp/mixer_search_results.xlsx",
-    #     sheet_name="Mixer",
-    #     index=False
-    # )
-    # ---------------------
-    page.close()
-    context.close()
-    browser.close()
+    graph_builder.add_node("grip_agent",online_completions_llm_node)
+    graph_builder.add_node("tool_call",tool_execution_node)
+
+    graph_builder.set_entry_point("grip_agent")
+    graph_builder.add_conditional_edges("grip_agent",route_after_agent,{
+        "tool_call":"tool_call",
+        "final_answer":"__end__"
+    })
+
+    graph_builder.add_edge("tool_call", "grip_agent") 
+
+    graph = graph_builder.compile(checkpointer=memory)
+
+    return graph 
 
 
-with sync_playwright() as playwright:
-    start = time.time()
-    logging.info("Starting Mixer Par Definition extraction")
-    try:
-      extract_par_mixer_definition_details(playwright,
-                                           "P",
-                                           "1/1/2025",
-                                           mixer_fetch_number=1,
-                                           par_fetch_number=1)
-    except Exception as e:
-      logging.error(f"Error occurred during extraction: {e}")
-    finally:
-      end = time.time()
-      logging.info(f"Extraction completed in {end - start:.2f} seconds")
-      logging.info("--------------------------------------------------")
+from typing import Annotated, Any, Optional, TypedDict, List, Dict
+from langgraph.graph import add_messages
+
+class File(TypedDict):
+   filename: str
+   path: str
+   type: str
+
+# Define the structure of the state
+class GraphState(TypedDict):
+    # Messages have the type "list". The `add_messages` function
+    # defines how this state key should be updated (appending messages).
+    user_query: Optional[str]
+    messages: List[Dict[str, str]] 
+    agent_output: Optional[dict]
+    files: list[File]
+    tool_results: Optional[Any]
+
