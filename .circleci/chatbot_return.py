@@ -1,22 +1,16 @@
-def create_multi_file_message(content: str, filenames: list[str]) -> HumanMessage:
-    """
-    Helper function to create a HumanMessage with multiple file attachments.
-    
-    Args:
-        content: The question or instruction for TableGPT
-        filenames: List of filenames to attach
-    
-    Returns:
-        HumanMessage with multiple attachments
-    """
-    return HumanMessage(
-        content=content,
-        additional_kwargs={
-            "attachments": [Attachment(filename=fname) for fname in filenames]
-        }
-    )
+# Debug: Print all visible buttons in the pagination area
+pagination_area = page.locator(
+    "iframe[name=\"PegaGadget0Ifr\"]"
+).content_frame.locator(
+    "[data-test-id=\"\\32 019112808553400251\"] tr"
+).filter(
+    has_text="Export to ExcelExport Non Par"
+)
 
-# Usage example
-files = ["data1.xlsx", "data2.csv", "report.xlsx"]
-question = "Please merge these datasets and create a pivot table showing monthly trends."
-message = create_multi_file_message(question, files)
+# Log what buttons are available
+buttons = pagination_area.locator("button").all()
+for i, btn in enumerate(buttons):
+    try:
+        logging.info(f"Button {i}: text='{btn.inner_text()}', name='{btn.get_attribute('name')}'")
+    except:
+        pass
