@@ -1,187 +1,369 @@
----------------------------------------------------------------------------
-TypeError                                 Traceback (most recent call last)
-Cell In[30], line 1
-----> 1 agent.invoke(input=_input)
+import logging
+import os
+from pathlib import Path
+import re
+import time
+import pandas as pd
+from playwright.sync_api import Playwright, sync_playwright
+from dotenv import load_dotenv
+load_dotenv()
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\__init__.py:2718, in Pregel.invoke(self, input, config, stream_mode, output_keys, interrupt_before, interrupt_after, checkpoint_during, debug, **kwargs)
-   2716 else:
-   2717     chunks = []
--> 2718 for chunk in self.stream(
-   2719     input,
-   2720     config,
-   2721     stream_mode=stream_mode,
-   2722     output_keys=output_keys,
-   2723     interrupt_before=interrupt_before,
-   2724     interrupt_after=interrupt_after,
-   2725     checkpoint_during=checkpoint_during,
-   2726     debug=debug,
-   2727     **kwargs,
-   2728 ):
-   2729     if stream_mode == "values":
-   2730         latest = chunk
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+    handlers=[
+        logging.FileHandler("temp/mixer_par_npar_definition_search.log"),
+        logging.StreamHandler()
+    ]
+)
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\__init__.py:2356, in Pregel.stream(self, input, config, stream_mode, output_keys, interrupt_before, interrupt_after, checkpoint_during, debug, subgraphs)
-   2350     # Similarly to Bulk Synchronous Parallel / Pregel model
-   2351     # computation proceeds in steps, while there are channel updates.
-   2352     # Channel updates from step N are only visible in step N+1
-   2353     # channels are guaranteed to be immutable for the duration of the step,
-   2354     # with channel updates applied only at the transition between steps.
-   2355     while loop.tick(input_keys=self.input_channels):
--> 2356         for _ in runner.tick(
-   2357             loop.tasks.values(),
-   2358             timeout=self.step_timeout,
-   2359             retry_policy=self.retry_policy,
-   2360             get_waiter=get_waiter,
-   2361         ):
-   2362             # emit output
-   2363             yield from output()
-   2364 # emit output
+def extract_par_mixer_definition_details(playwright: Playwright,
+                                         claim_type: str,
+                                         service_from_date: str,
+                                         mixer_fetch_number: None,
+                                         par_fetch_number: None) -> None:
+    browser = playwright.chromium.launch(channel="chrome", headless=False)
+    context = browser.new_context(http_credentials={
+        "username": os.getenv("PEGA_USERNAME"),
+        "password": os.getenv("PEGA_PASSWORD"),
+    },
+    accept_downloads=True,
+    )
+    page = context.new_page()
+    page.goto("https://pmc.uat.antheminc.com/prweb/PRAuth/SSO")
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\runner.py:158, in PregelRunner.tick(self, tasks, reraise, timeout, retry_policy, get_waiter)
-    156 t = tasks[0]
-    157 try:
---> 158     run_with_retry(
-    159         t,
-    160         retry_policy,
-    161         configurable={
-    162             CONFIG_KEY_CALL: partial(
-    163                 _call,
-    164                 weakref.ref(t),
-    165                 retry=retry_policy,
-    166                 futures=weakref.ref(futures),
-    167                 schedule_task=self.schedule_task,
-    168                 submit=self.submit,
-    169                 reraise=reraise,
-    170             ),
-    171         },
-    172     )
-    173     self.commit(t, None)
-    174 except Exception as exc:
+    # Wait for either login page or landing page
+    page.wait_for_load_state("networkidle")
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\retry.py:39, in run_with_retry(task, retry_policy, configurable)
-     37     task.writes.clear()
-     38     # run the task
----> 39     return task.proc.invoke(task.input, config)
-     40 except ParentCommand as exc:
-     41     ns: str = config[CONF][CONFIG_KEY_CHECKPOINT_NS]
+    current_url = page.url
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\utils\runnable.py:622, in RunnableSeq.invoke(self, input, config, **kwargs)
-    620     # run in context
-    621     with set_config_context(config, run) as context:
---> 622         input = context.run(step.invoke, input, config, **kwargs)
-    623 else:
-    624     input = step.invoke(input, config)
+    if re.match(r"https://secure-fed\.uat\.anthem\.com/as/.*/resume/as/authorization\.ping", current_url):
+        # Not logged in, perform login
+        page.locator("#username").fill(os.getenv("PEGA_USERNAME"))
+        page.locator("#password").fill(os.getenv("PEGA_PASSWORD"))
+        page.get_by_text("Submit").click()
+        # Optionally wait for landing page after login
+        page.wait_for_load_state()
+    else:
+        logging.info("Already logged in, skipping login steps.")
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\__init__.py:2718, in Pregel.invoke(self, input, config, stream_mode, output_keys, interrupt_before, interrupt_after, checkpoint_during, debug, **kwargs)
-   2716 else:
-   2717     chunks = []
--> 2718 for chunk in self.stream(
-   2719     input,
-   2720     config,
-   2721     stream_mode=stream_mode,
-   2722     output_keys=output_keys,
-   2723     interrupt_before=interrupt_before,
-   2724     interrupt_after=interrupt_after,
-   2725     checkpoint_during=checkpoint_during,
-   2726     debug=debug,
-   2727     **kwargs,
-   2728 ):
-   2729     if stream_mode == "values":
-   2730         latest = chunk
+    # page.wait_for_url(re.compile(r"https://secure-fed\.uat\.anthem\.com/as/.*/resume/as/authorization\.ping"))
+    
+    # Move mouse to the left edge so that the navbar appears
+    page.mouse.move(10, 300)
+    page.get_by_role("menuitem", name=" Mixer").click()
+    page.wait_for_load_state("networkidle")
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\__init__.py:2356, in Pregel.stream(self, input, config, stream_mode, output_keys, interrupt_before, interrupt_after, checkpoint_during, debug, subgraphs)
-   2350     # Similarly to Bulk Synchronous Parallel / Pregel model
-   2351     # computation proceeds in steps, while there are channel updates.
-   2352     # Channel updates from step N are only visible in step N+1
-   2353     # channels are guaranteed to be immutable for the duration of the step,
-   2354     # with channel updates applied only at the transition between steps.
-   2355     while loop.tick(input_keys=self.input_channels):
--> 2356         for _ in runner.tick(
-   2357             loop.tasks.values(),
-   2358             timeout=self.step_timeout,
-   2359             retry_policy=self.retry_policy,
-   2360             get_waiter=get_waiter,
-   2361         ):
-   2362             # emit output
-   2363             yield from output()
-   2364 # emit output
+    # Wait for "Mixer" button text
+    mixer_text = page.locator(
+        "iframe[name=\"PegaGadget0Ifr\"]"
+    ).content_frame.locator(
+        "[data-test-id=\"\\32 02007270744300208593_header\"]"
+    ).get_by_role("button").inner_text(timeout=10000)
+    if "Mixer" not in mixer_text:
+        raise Exception("Mixer button not found or text mismatch.")
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\runner.py:252, in PregelRunner.tick(self, tasks, reraise, timeout, retry_policy, get_waiter)
-    250 # panic on failure or timeout
-    251 try:
---> 252     _panic_or_proceed(
-    253         futures.done.union(f for f, t in futures.items() if t is not None),
-    254         panic=reraise,
-    255     )
-    256 except Exception as exc:
-    257     if tb := exc.__traceback__:
+    # Wait for "Mixer Data" button text
+    mixer_data_text = page.locator(
+        "iframe[name=\"PegaGadget0Ifr\"]"
+    ).content_frame.locator(
+        "[data-test-id=\"\\32 02105071050000776403_header\"]"
+    ).get_by_role("button").inner_text(timeout=10000)
+    if "Mixer Data" not in mixer_data_text:
+        raise Exception("Mixer Data button not found or text mismatch.")
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\runner.py:504, in _panic_or_proceed(futs, timeout_exc_cls, panic)
-    502                 interrupts.append(exc)
-    503             else:
---> 504                 raise exc
-    505 # raise combined interrupts
-    506 if interrupts:
+    # Wait for "Intraplan Search" button text
+    intraplan_text = page.locator(
+        "iframe[name=\"PegaGadget0Ifr\"]"
+    ).content_frame.locator(
+        "[data-test-id=\"\\32 02007300842570961532_header\"]"
+    ).get_by_role("button").inner_text(timeout=10000)
+    if "Intraplan Search" not in intraplan_text:
+        raise Exception("Intraplan Search button not found or text mismatch.")
+    
+    # Select "Claim Type" - Professional (P) or Institutional (I) or Both (B)
+    page.locator("iframe[name=\"PegaGadget0Ifr\"]").content_frame.locator("[data-test-id=\"\\32 02007270744300209206208\"]").select_option(claim_type)
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\executor.py:83, in BackgroundExecutor.done(self, task)
-     81 """Remove the task from the tasks dict when it's done."""
-     82 try:
----> 83     task.result()
-     84 except GraphBubbleUp:
-     85     # This exception is an interruption signal, not an error
-     86     # so we don't want to re-raise it on exit
-     87     self.tasks.pop(task)
+    # Select "Service From Date" - 5/11/2025
+    page.locator("iframe[name=\"PegaGadget0Ifr\"]").content_frame.locator("[data-test-id=\"\\32 02007270744300212213698\"]").fill(service_from_date)
+    
+    # Select "Service Thru Date" - 12/31/9999
+    page.locator("iframe[name=\"PegaGadget0Ifr\"]").content_frame.locator("[data-test-id=\"\\32 02007270744300213214304\"]").fill("12/31/9999")
+    
+    # Click "Search" button
+    page.locator("iframe[name=\"PegaGadget0Ifr\"]").content_frame.locator("[data-test-id=\"\\32 01911280422460287138707\"]").click()
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\concurrent\futures\_base.py:449, in Future.result(self, timeout)
-    447     raise CancelledError()
-    448 elif self._state == FINISHED:
---> 449     return self.__get_result()
-    451 self._condition.wait(timeout)
-    453 if self._state in [CANCELLED, CANCELLED_AND_NOTIFIED]:
+    page.wait_for_load_state("networkidle")
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\concurrent\futures\_base.py:401, in Future.__get_result(self)
-    399 if self._exception:
-    400     try:
---> 401         raise self._exception
-    402     finally:
-    403         # Break a reference cycle with the exception in self._exception
-    404         self = None
+    # Wait for the search results to load
+    results_text = page.locator(
+        "iframe[name=\"PegaGadget0Ifr\"]"
+    ).content_frame.locator(
+        "[data-test-id=\"\\32 020050306042607747849\"]"
+    ).inner_text()
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\concurrent\futures\thread.py:59, in _WorkItem.run(self)
-     56     return
-     58 try:
----> 59     result = self.fn(*self.args, **self.kwargs)
-     60 except BaseException as exc:
-     61     self.future.set_exception(exc)
+    if not re.search(r"\d+ results found", results_text):
+        raise Exception("No results found.")
+    
+    # mixer_df = pd.DataFrame(columns=[, 
+    #                                  "Network/Contract", "Pricing Contract", "Pricing Variance", "Par Ind"])
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\pregel\retry.py:39, in run_with_retry(task, retry_policy, configurable)
-     37     task.writes.clear()
-     38     # run the task
----> 39     return task.proc.invoke(task.input, config)
-     40 except ParentCommand as exc:
-     41     ns: str = config[CONF][CONFIG_KEY_CHECKPOINT_NS]
+    # mixer_df["Business Type"] = pd.Series(dtype="string")
+    # mixer_df["Mixer Ind F"] = pd.Series(dtype="string")
+    # mixer_df["Mixer Ind W"] = pd.Series(dtype="string")
+    
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\utils\runnable.py:622, in RunnableSeq.invoke(self, input, config, **kwargs)
-    620     # run in context
-    621     with set_config_context(config, run) as context:
---> 622         input = context.run(step.invoke, input, config, **kwargs)
-    623 else:
-    624     input = step.invoke(input, config)
+    # total_search_results = int(re.search(r"(\d+) results found", results_text).group(1))
 
-File c:\ProgramData\Anaconda3\envs\grip-ai-agent\Lib\site-packages\langgraph\utils\runnable.py:317, in RunnableCallable.invoke(self, input, config, **kwargs)
-    313 def invoke(
-    314     self, input: Any, config: Optional[RunnableConfig] = None, **kwargs: Any
-    315 ) -> Any:
-    316     if self.func is None:
---> 317         raise TypeError(
-    318             f'No synchronous function provided to "{self.name}".'
-    319             "\nEither initialize with a synchronous function or invoke"
-    320             " via the async API (ainvoke, astream, etc.)"
-    321         )
-    322     if config is None:
-    323         config = ensure_config()
+    if mixer_fetch_number is None:
+        number_of_pages = int(page.locator(
+            "iframe[name=\"PegaGadget0Ifr\"]"
+            ).content_frame.locator(
+                "[data-test-id=\"\\32 019112808553400251\"] tr"
+                ).filter(
+                    has_text="Export to ExcelExport Non Par"
+                    ).locator(
+                        "[data-test-id=\"\\32 0141121165713061615380\"]"
+                        ).inner_text())
+    else:
+        number_of_pages = mixer_fetch_number
+    j = 0
 
-TypeError: No synchronous function provided to "retrieve_columns".
-Either initialize with a synchronous function or invoke via the async API (ainvoke, astream, etc.)
-During task with name 'retrieve_columns' and id '805d07a8-ea72-11f9-8fb0-a51c99e537ee'
-During task with name 'data_analyze_graph' and id '75b517a9-7f90-7d16-7ca2-bd52960b57f8'
+    while number_of_pages > 0:
+        i = 1
+        page_input = page.locator(
+            "iframe[name=\"PegaGadget0Ifr\"]"
+            ).content_frame.locator('input[name="pyGridActivePage"]').first
+        # Get the aria-label attribute
+        aria_label = page_input.get_attribute("aria-label")
+        # Extract the first number using regex
+        current_page = int(re.search(r"\b(\d+)\b", aria_label).group(1))
+
+        while i <= 10:
+            j = j + 1
+            logging.info(f"Processing overall row {j} and current row {i} on page {current_page}")
+            try:
+                row_locator = page.locator(
+                    "iframe[name=\"PegaGadget0Ifr\"]"
+                    ).content_frame.locator(
+                        f"[data-test-id=\"\\32 019112808553400251-R{j}\"] [data-test-id=\"\\32 02007221237320152105630\"]"
+                        )
+
+                if not row_locator.is_visible(timeout=3000):
+                    logging.info(f"Row {j} is not visible. Breaking inner loop.")
+                    break
+
+                row_locator.click()
+
+                page.locator(
+                    "iframe[name=\"PegaGadget0Ifr\"]"
+                    ).content_frame.get_by_role("menuitem", name="View Mixer Details").click()
+
+                
+                business_type = page.locator(
+                    "iframe[name=\"PegaGadget1Ifr\"]"
+                    ).content_frame.locator("div").filter(
+                        has_text=re.compile(r"^Business typeno value$")
+                        ).locator("[data-test-id=\"\\32 020031808065500477439\"]").inner_text()
+
+                mixer_ind_f = page.locator(
+                    "iframe[name=\"PegaGadget1Ifr\"]"
+                    ).content_frame.locator("div").filter(
+                        has_text=re.compile(r"^MIX IND F Return value to CLMno value$")
+                        ).locator("[data-test-id=\"\\32 020031808065500477439\"]").inner_text()
+
+                mixer_ind_w = page.locator(
+                    "iframe[name=\"PegaGadget1Ifr\"]"
+                    ).content_frame.locator("div").filter(
+                        has_text=re.compile(r"^MIX IND W Return value to CLMno value$")
+                        ).locator("[data-test-id=\"\\32 020031808065500477439\"]").inner_text()
+
+                # logging.info(f"Business Type: {business_type}")
+                # mixer_df.at[j, "Business Type"] = business_type
+                # logging.info(f"Mixer Ind F: {mixer_ind_f}")
+                # mixer_df.at[j, "Mixer Ind F"] = mixer_ind_f
+                # logging.info(f"Mixer Ind W: {mixer_ind_w}")
+                # mixer_df.at[j, "Mixer Ind W"] = mixer_ind_w
+
+                code_spans = page.locator(
+                                    "iframe[name=\"PegaGadget1Ifr\"]"
+                                ).content_frame.locator(
+                                    "span[data-test-id=\"202007291253110027323989\"]"
+                                ).all_inner_texts()
+
+                # Assign by index (adjust indices if order is different)
+                last_alphabet = (code_spans[1] if len(code_spans) > 1 else "").split()[0][0]
+                product_code = code_spans[2] if len(code_spans) > 2 else ""
+                coverage_code = code_spans[3] if len(code_spans) > 3 else ""
+                variance = code_spans[4] if len(code_spans) > 4 else ""
+                i = i + 1
+                logging.info(f"Tab Name: {product_code}{coverage_code}{variance}P{last_alphabet}")
+
+                # EXTRACT PAR RESULTS
+                # Wait for the iframe to be available
+                iframe_selector = f'iframe[title="{product_code}{coverage_code}{variance}P{last_alphabet}"]'
+                page.wait_for_selector(iframe_selector, timeout=10000)
+
+                # Use FrameLocator to find the divs
+                results_locator = page.frame_locator(iframe_selector).locator("div.dataLabelRead")
+
+                par_results = None
+                for text in results_locator.all_inner_texts():
+                    logging.info(f"dataLabelRead text: {text}")
+                    if re.search(r"\d+\s+results found", text):
+                        par_results = text
+                        break
+
+                if par_results is None:
+                    logging.warning("No PAR results div found.")
+                else:
+                    logging.info(f"PAR Results: {par_results}")
+
+                number_of_results = int(re.search(r"(\d+) results found", par_results).group(1))
+                if number_of_results > 20:
+                    try:
+                        number_of_par_pages = int(
+                            page.locator(f"iframe[title=\"{product_code}{coverage_code}{variance}P{last_alphabet}\"]"
+                                        ).content_frame.locator(
+                                            "div.dataLabelRead"
+                                            ).filter(
+                                                has_text=re.compile(r"^\d+$")
+                                                ).first.inner_text())
+                    except Exception as e:
+                        logging.exception(f"Error occurred: {e}")
+                        number_of_par_pages = 1
+                elif number_of_results == 0:
+                    number_of_par_pages = 0
+                else:
+                    number_of_par_pages = 1
+                
+                if par_fetch_number is not None and number_of_par_pages != 0:
+                    number_of_par_pages = par_fetch_number
+
+                logging.info(f"Number of PAR results: {number_of_results} -- Number of pages: {number_of_par_pages}")
+
+                par_df = pd.DataFrame(columns=["Business Type", "Mixer Ind F", "Mixer Ind W",
+                                               "Product Code", "Coverage Code", 
+                                                "Variance", "Priority Order",
+                                                "Network/Contract", "Pricing Contract",
+                                                "Pricing Variance", "Par Ind"])
+
+                while number_of_par_pages > 0:
+                    if number_of_results > 20:
+                        current_page = int(page.locator(
+                            f"iframe[title=\"{product_code}{coverage_code}{variance}P{last_alphabet}\"]"
+                            ).content_frame.get_by_role(
+                                "textbox", name="Page 1 of").input_value())
+                    else:
+                        current_page = 1
+                    
+                    content_frame = page.locator(f"iframe[title=\"{product_code}{coverage_code}{variance}P{last_alphabet}\"]").content_frame
+
+                    # Extract headers
+                    header_cells = content_frame.locator("table.gridTable > tbody > tr").first.locator("th")
+                    headers = [header_cells.nth(i).locator(".cellIn").inner_text().strip() for i in range(header_cells.count())]
+                    headers = ["Business Type", "Mixer Ind F", "Mixer Ind W", "Product Code", "Coverage Code", "Variance"] + headers
+                    logging.info(f"Par Table Headers: {headers}")
+
+                    try:
+                        table_locator = content_frame.locator('table#bodyTbl_right').nth(0)
+                        row_locators = table_locator.locator("tbody > tr.oddRow, tbody > tr.evenRow")
+                        logging.info(f"Extracting {row_locators.count()} rows on PAR page {current_page}")
+                        for row_idx in range(row_locators.count()):
+                            rows = [business_type, mixer_ind_f, mixer_ind_w, product_code, coverage_code, variance]
+                            cell_locators = row_locators.nth(row_idx).locator("td")
+                            row_data = [cell_locators.nth(i).locator("span").inner_text().strip() for i in range(cell_locators.count())]
+                            rows.extend(row_data)
+                            logging.info(f"Par Table Rows - {row_idx}: {rows}")
+                            temp_par_df = pd.DataFrame([rows], columns=headers)
+                            par_df = pd.concat([par_df, temp_par_df], ignore_index=True)
+
+                    except Exception as e:
+                        logging.exception(f"Error occurred: {e}")
+                        break
+                        
+                    next_button_locator = page.locator(f"iframe[title=\"{product_code}{coverage_code}{variance}P{last_alphabet}\"]").content_frame.get_by_role("button", name=">", exact=True)
+                    
+                    if next_button_locator.count() > 0 and next_button_locator.is_visible(timeout=1000):
+                        next_button_locator.click(timeout=3000)
+                        page.wait_for_load_state("networkidle")
+                    else:
+                        logging.info("Next button not found or not visible, ending PAR page loop.")
+                    
+                    number_of_par_pages = number_of_par_pages - 1
+                    logging.info(f"Number of PAR pages left: {number_of_par_pages}")
+                
+                try:
+                    saved_par_df = pd.read_excel(Path(__file__).parent.parent / "temp/par_results.xlsx")
+                    par_df = pd.concat([saved_par_df, par_df], ignore_index=True)
+                    par_df.to_excel(Path(__file__).parent.parent / "temp/par_results.xlsx", index=False)
+                except FileNotFoundError:
+                    par_df.to_excel(Path(__file__).parent.parent / "temp/par_results.xlsx", index=False)
+                logging.info("PAR results saved to par_results.xlsx")
+
+            except Exception as e:
+                logging.error(f"Error occurred: {e}")
+                break
+
+            finally:
+                try:
+                    page.get_by_role(
+                        "tab", name=f"{product_code}{coverage_code}{variance}P{last_alphabet} Press Delete to"
+                    ).get_by_label("Close this tab").click(timeout=3000)
+                except Exception as close_e:
+                    logging.warning(f"Could not close tab: {close_e}")
+        
+        # get the next page
+        next_page_locator = page.locator(
+            "iframe[name=\"PegaGadget0Ifr\"]"
+            ).content_frame.locator(
+                "[data-test-id=\"\\32 019112808553400251\"] tr"
+                ).filter(
+                    has_text="Export to ExcelExport Non Par"
+                    ).locator(
+                        "button[name=\"pyGridPaginator_pyDisplayHarness\\.CPRActions_9\"]"
+                        )
+        if not next_page_locator.is_visible(timeout=2000):
+            logging.info("Next page locator is not visible. Breaking inner loop.")
+            break
+
+        next_page_locator.click()
+        page.wait_for_load_state("networkidle")
+
+        page_input = page.locator(
+            "iframe[name=\"PegaGadget0Ifr\"]"
+            ).content_frame.locator('input[name="pyGridActivePage"]').first
+        # Get the aria-label attribute
+        aria_label = page_input.get_attribute("aria-label")
+        # Extract the first number using regex
+        current_page = int(re.search(r"\b(\d+)\b", aria_label).group(1))
+
+        number_of_pages =  number_of_pages - 1
+        logging.info(f"Number of Mxer details pages left: {number_of_pages}")
+
+   
+    # mixer_df.to_excel(Path(__file__).parent.parent / "temp/mixer_search_results.xlsx",
+    #     sheet_name="Mixer",
+    #     index=False
+    # )
+    # ---------------------
+    page.close()
+    context.close()
+    browser.close()
+
+
+with sync_playwright() as playwright:
+    start = time.time()
+    logging.info("Starting Mixer Par Definition extraction")
+    try:
+      extract_par_mixer_definition_details(playwright,
+                                           "P",
+                                           "1/1/2025",
+                                           mixer_fetch_number=1,
+                                           par_fetch_number=1)
+    except Exception as e:
+      logging.error(f"Error occurred during extraction: {e}")
+    finally:
+      end = time.time()
+      logging.info(f"Extraction completed in {end - start:.2f} seconds")
+      logging.info("--------------------------------------------------")
