@@ -1,4 +1,130 @@
 import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import re
+from typing import List, Tuple, Optional
+
+class InsurancePlanMatcher:
+    def __init__(self, df: pd.DataFrame, description_column: str):
+        """Initialize matcher with dataframe and target column."""
+        self.df = df
+        self.column = description_column
+        self.unique_values = df[description_column].dropna().unique()
+        
+        # Setup TF-IDF vectorizer
+        self.vectorizer = TfidfVectorizer(
+            lowercase=True,
+            token_pattern=r'\b[A-Za-z0-9%]+\b',
+            ngram_range=(1, 3),
+            max_features=3000
+        )
+        self.tfidf_matrix = self.vectorizer.fit_transform(self.unique_values)
+        
+    def extract_keywords(self, text: str) -> List[str]:
+        """Extract meaningful keywords from query."""
+        text_upper = text.upper()
+        keywords = []
+        
+        # Extract acronyms (2+ capital letters)
+        keywords.extend(re.findall(r'\b[A-Z]{2,}\b', text_upper))
+        
+        # Extract percentages and numbers
+        keywords.extend(re.findall(r'\d+%?', text))
+        
+        # Extract percentiles
+        keywords.extend(re.findall(r'\d+(?:ST|ND|RD|TH)', text_upper))
+        
+        return keywords
+    
+    def match(self, query: str, threshold: float = 0.3) -> pd.DataFrame:
+        """
+        Find matching rows for user query.
+        
+        Args:
+            query: User input text
+            threshold: Minimum confidence score (0-1)
+            
+        Returns:
+            DataFrame with matching rows
+        """
+        # Try keyword matching first
+        keywords = self.extract_keywords(query)
+        
+        if keywords:
+            # Find descriptions containing any keyword
+            matches = []
+            for desc in self.unique_values:
+                desc_upper = desc.upper()
+                score = sum(1 for kw in keywords if kw in desc_upper) / len(keywords)
+                if score > 0:
+                    matches.append((desc, score))
+            
+            # Sort by score and get best match
+            if matches:
+                matches.sort(key=lambda x: x[1], reverse=True)
+                best_match, score = matches[0]
+                if score >= threshold:
+                    return self.df[self.df[self.column] == best_match]
+        
+        # Fallback to TF-IDF similarity
+        query_vector = self.vectorizer.transform([query.lower()])
+        similarities = cosine_similarity(query_vector, self.tfidf_matrix).flatten()
+        
+        # Get best match
+        best_idx = similarities.argmax()
+        if similarities[best_idx] >= threshold:
+            best_match = self.unique_values[best_idx]
+            return self.df[self.df[self.column] == best_match]
+        
+        return pd.DataFrame()  # No match found
+    
+    def get_suggestions(self, query: str, top_n: int = 5) -> List[Tuple[str, float]]:
+        """Get top N suggestions for a query."""
+        query_vector = self.vectorizer.transform([query.lower()])
+        similarities = cosine_similarity(query_vector, self.tfidf_matrix).flatten()
+        
+        # Get top indices
+        top_indices = similarities.argsort()[-top_n:][::-1]
+        
+        suggestions = []
+        for idx in top_indices:
+            if similarities[idx] > 0:
+                suggestions.append((self.unique_values[idx], float(similarities[idx])))
+        
+        return suggestions
+
+# Usage example:
+if __name__ == "__main__":
+    # Load data
+    df = pd.read_excel('insurance_plans.xlsx')
+    matcher = InsurancePlanMatcher(df, 'plan_description')
+    
+    # Example queries
+    queries = [
+        "HSA",
+        "AFG 90th percentile",
+        "I need a plan with CMS 120 percent coverage",
+        "lumenos health savings account"
+    ]
+    
+    for query in queries:
+        print(f"\nQuery: '{query}'")
+        result = matcher.match(query)
+        
+        if not result.empty:
+            print(f"Found {len(result)} matching rows")
+            print(f"Matched: {result['plan_description'].iloc[0]}")
+        else:
+            print("No exact match. Suggestions:")
+            suggestions = matcher.get_suggestions(query, top_n=3)
+            for desc, score in suggestions:
+                print(f"  - {desc} (score: {score:.2f})")
+
+
+#######################################################################################################################################
+
+import pandas as pd
 import re
 from fuzzywuzzy import fuzz, process
 from sklearn.feature_extraction.text import TfidfVectorizer
