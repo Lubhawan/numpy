@@ -98,3 +98,5 @@ class InsurancePlanMatcher:
         # Sort and return top N
         suggestions.sort(key=lambda x: x[1], reverse=True)
         return suggestions[:top_n]
+
+how to implement a logic for date search using nlp to match data col in excel which is in some format different than asked query
