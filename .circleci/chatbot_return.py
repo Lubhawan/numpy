@@ -144,3 +144,33 @@ for date_str in dates:
     parsed = parse_any_date(date_str)
     if parsed:
         print(f"{date_str} -> {parsed}")
+
+
+import pandas as pd
+from dateutil import parser
+
+# Your DataFrame
+df = pd.DataFrame({
+    'date_strings': [
+        "2023-12-25",
+        "December 25, 2023", 
+        "25/12/2023",
+        "12-25-23",
+        "2023/12/25 14:30:00",
+        "invalid_date",
+        None
+    ]
+})
+
+df['parsed_dates'] = pd.to_datetime(df['date_strings'], errors='coerce')
+
+# Single date to compare against
+comparison_date = pd.to_datetime("2023-12-20")
+
+# Compare entire column - NaN values automatically return False
+df['after_dec_20'] = df['parsed_dates'] > comparison_date
+df['before_dec_20'] = df['parsed_dates'] < comparison_date
+df['equal_dec_20'] = df['parsed_dates'] == comparison_date
+
+print("Basic Comparison:")
+print(df[['date_strings', 'parsed_dates', 'after_dec_20', 'before_dec_20']])
