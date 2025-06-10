@@ -119,3 +119,28 @@ class InsurancePlanMatcher:
         # Get all scores and return top N
         scores = self._calculate_scores(query)
         return scores[:top_n]
+
+
+from dateutil import parser
+from datetime import datetime
+
+def parse_any_date(date_string):
+    """Parse any common date format"""
+    try:
+        return parser.parse(date_string)
+    except ValueError:
+        return None
+
+# Examples
+dates = [
+    "2023-12-25",
+    "December 25, 2023",
+    "25/12/2023",
+    "12-25-23",
+    "2023/12/25 14:30:00"
+]
+
+for date_str in dates:
+    parsed = parse_any_date(date_str)
+    if parsed:
+        print(f"{date_str} -> {parsed}")
